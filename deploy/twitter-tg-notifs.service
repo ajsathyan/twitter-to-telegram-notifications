@@ -1,0 +1,22 @@
+[Unit]
+Description=X to Telegram notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/twitter-tg-notifs
+EnvironmentFile=/etc/twitter-tg-notifs/.env
+ExecStart=/opt/twitter-tg-notifs/.venv/bin/twitter-tg-notifs run --config /etc/twitter-tg-notifs/config.toml --state-db /var/lib/twitter-tg-notifs/state.sqlite3
+Restart=always
+RestartSec=10
+User=twitter-tg-notifs
+Group=twitter-tg-notifs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/twitter-tg-notifs
+
+[Install]
+WantedBy=multi-user.target

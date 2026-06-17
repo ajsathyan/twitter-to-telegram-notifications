@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twitter-tg-notifs"
+version = "0.1.0"
+description = "Lightweight X/Twitter account monitor that forwards new posts to Telegram"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.1",
+  "requests>=2.32.0",
+]
+
+[project.scripts]
+twitter-tg-notifs = "twitter_tg_notifs.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
