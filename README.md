@@ -11,8 +11,6 @@ Self-hosted X/Twitter to Telegram notifications for a mini PC or homelab.
 
 No scraping. No X password. No backlog spam. The daemon polls configured X accounts with the official API, stores durable state in SQLite, and forwards new qualifying posts to a Telegram chat or channel.
 
-I kept the README focused on the product and the common setup path. If your mini PC, distro, service layout, or Hermes setup needs different commands, paste this README into your AI coding agent and ask it to tailor the steps below to your machine.
-
 ![Local web console showing watched accounts, per-account repost controls, filter instructions, service status, and classifier test](docs/assets/local-web-console.jpg)
 
 ## What you get
@@ -23,6 +21,19 @@ I kept the README focused on the product and the common setup path. If your mini
 - Reply exclusion globally and repost controls per account.
 - Optional topic filtering for noisy accounts through Hermes, xAI/Grok, or any OpenAI-compatible endpoint.
 - A small Python daemon that runs comfortably under `systemd` on a low-resource Linux box.
+
+## Using this with an AI agent
+
+The README keeps commands short on purpose. For machine-specific setup, clone the repo and open it in Codex or another repo-aware coding agent so it can inspect the files directly.
+
+Useful things to ask:
+
+- "Adapt the systemd service for my mini PC paths and Linux distro."
+- "Configure this repo to call my local Hermes endpoint for topic filtering."
+- "Help me add these X/Twitter accounts and filter instructions to `config.toml`."
+- "Walk me through Telegram channel setup and verify my chat ID format."
+- "Run a dry-run safely without changing my production SQLite state."
+- "Add a new classifier provider or deployment option."
 
 ## Built for homelabs
 
