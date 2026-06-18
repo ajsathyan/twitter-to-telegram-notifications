@@ -5,9 +5,13 @@
 [![Official X API](https://img.shields.io/badge/X%20API-official-111111)](https://developer.x.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-229ED9)](https://core.telegram.org/bots/api)
 
+I made this for my homelab mini PC because I wanted more control over X/Twitter notifications. The current notification system is pretty barebones for power users, especially people watching social signals for markets. I have found this useful so far and wanted to share it. Please reach out, open issues, or send PRs if you want to add functionality. Thank you.
+
 Self-hosted X/Twitter to Telegram notifications for a mini PC or homelab.
 
 No scraping. No X password. No backlog spam. The daemon polls configured X accounts with the official API, stores durable state in SQLite, and forwards new qualifying posts to a Telegram chat or channel.
+
+I kept the README focused on the product and the common setup path. If your mini PC, distro, service layout, or Hermes setup needs different commands, paste this README into your AI coding agent and ask it to tailor the steps below to your machine.
 
 ![Local web console showing watched accounts, per-account repost controls, filter instructions, service status, and classifier test](docs/assets/local-web-console.jpg)
 
