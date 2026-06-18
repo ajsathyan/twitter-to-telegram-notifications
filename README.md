@@ -24,8 +24,8 @@ Twitter/X alerts are noisy, fragile, and usually tied to a phone. This project g
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/twitter-tg-notifs.git
-cd twitter-tg-notifs
+git clone https://github.com/ajsathyan/twitter-to-telegram-notifications.git
+cd twitter-to-telegram-notifications
 
 python3.11 -m venv .venv || python3 -m venv .venv
 . .venv/bin/activate
@@ -158,7 +158,7 @@ sudo apt install -y git python3 python3-venv
 sudo mkdir -p /opt/twitter-tg-notifs /etc/twitter-tg-notifs /var/lib/twitter-tg-notifs
 sudo chown "$USER":"$USER" /opt/twitter-tg-notifs
 
-git clone https://github.com/YOUR_GITHUB_USERNAME/twitter-tg-notifs.git /opt/twitter-tg-notifs
+git clone https://github.com/ajsathyan/twitter-to-telegram-notifications.git /opt/twitter-tg-notifs
 cd /opt/twitter-tg-notifs
 
 python3 -m venv .venv
