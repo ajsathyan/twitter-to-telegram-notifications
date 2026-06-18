@@ -577,9 +577,9 @@ input { height: 36px; padding: 0 10px; width: 150px; }
 .bad { color: var(--red); }
 .table-row {
   display: grid;
-  grid-template-columns: 190px 150px 80px 104px 126px;
+  grid-template-columns: 178px 136px 70px 96px 108px;
   align-items: center;
-  column-gap: 14px;
+  column-gap: 12px;
   min-height: 62px;
   padding: 0 18px;
   border-bottom: 1px solid #eef1f4;

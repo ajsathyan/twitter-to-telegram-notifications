@@ -5,23 +5,93 @@
 [![Official X API](https://img.shields.io/badge/X%20API-official-111111)](https://developer.x.com/)
 [![Telegram Bot API](https://img.shields.io/badge/Telegram-Bot%20API-229ED9)](https://core.telegram.org/bots/api)
 
-Self-hosted X/Twitter to Telegram notifications for a mini PC.
+Self-hosted X/Twitter to Telegram notifications for a mini PC or homelab.
 
-No scraping. No X password. No backlog spam. This daemon polls configured X accounts with the official API, stores durable state in SQLite, and forwards new qualifying posts to a Telegram chat or channel.
+No scraping. No X password. No backlog spam. The daemon polls configured X accounts with the official API, stores durable state in SQLite, and forwards new qualifying posts to a Telegram chat or channel.
 
-## Why this exists
+![Local web console showing watched accounts, per-account repost controls, filter instructions, service status, and classifier test](docs/assets/local-web-console.jpg)
 
-Twitter/X alerts are noisy, fragile, and usually tied to a phone. This project gives you a small always-on notifier that you control:
+## What you get
 
-- Watch specific X/Twitter accounts with per-account settings.
-- Send clean Telegram HTML messages with account links, post links, shared links, quotes, reposts, polls, images, and video fallbacks.
-- Skip replies globally.
-- Send reposts by default, with a Yes/No radio per account in the local web UI.
-- Establish a first-run baseline without sending old posts.
-- Filter noisy accounts through a local Hermes-style endpoint, xAI/Grok, or any OpenAI-compatible endpoint.
-- Run continuously with `systemd` on a low-resource Linux mini PC.
+- A local web console for adding accounts, removing accounts, toggling reposts, and editing per-account filter instructions.
+- First-run baselining so old posts do not flood Telegram.
+- Clean Telegram messages with account links, Open on X links, expanded shared links, quotes, reposts, polls, photos, and video fallbacks.
+- Reply exclusion globally and repost controls per account.
+- Optional topic filtering for noisy accounts through Hermes, xAI/Grok, or any OpenAI-compatible endpoint.
+- A small Python daemon that runs comfortably under `systemd` on a low-resource Linux box.
 
-## Quick Start
+## Built for homelabs
+
+The intended setup is simple:
+
+1. Run the notifier daemon on a mini PC.
+2. Keep secrets in `/etc/twitter-tg-notifs/.env`.
+3. Manage accounts from the localhost web console.
+4. Optionally run Hermes next to it for local relevance filtering.
+5. Let Telegram be the delivery surface on your phone, desktop, or channel.
+
+The web UI is localhost-only by default. On a headless mini PC, tunnel it from your laptop:
+
+```bash
+ssh -L 4319:127.0.0.1:4319 mini-pc
+/opt/twitter-tg-notifs/.venv/bin/twitter-tg-notifs web \
+  --config /etc/twitter-tg-notifs/config.toml \
+  --env-file /etc/twitter-tg-notifs/.env \
+  --no-open
+```
+
+Then open `http://127.0.0.1:4319`.
+
+## Hermes and local filtering
+
+Noisy accounts can be filtered before Telegram delivery. The app sends a normalized tweet payload plus the account's filter instructions to a classifier and only sends the Telegram message when the classifier returns `send: true`.
+
+Local Hermes-style endpoint:
+
+```http
+POST http://127.0.0.1:8787/classify
+```
+
+Expected strict JSON:
+
+```json
+{
+  "send": true,
+  "confidence": 0.86,
+  "matched_topics": ["AI data center electricity demand"],
+  "reason": "The post discusses electricity demand growth from AI infrastructure."
+}
+```
+
+Example config:
+
+```toml
+[classifier]
+provider = "http_json"
+http_json_url = "http://127.0.0.1:8787/classify"
+fallback_provider = "xai"
+
+[[accounts]]
+username = "noisy_account"
+include_reposts = true
+
+[accounts.topic_filter]
+enabled = true
+instructions = "Send only posts about nuclear power, AI data center electricity demand, coal exports, or utility capex. Skip broad market commentary."
+confidence_threshold = 0.70
+on_filter_error = "skip"
+```
+
+Provider options:
+
+- `none`: no filtering.
+- `http_json`: local endpoint such as Hermes.
+- `xai`: hosted xAI/Grok with `XAI_API_KEY`.
+- `openai_compatible`: any OpenAI-compatible `/chat/completions` endpoint with optional `OPENAI_API_KEY`.
+
+The classifier only decides relevance. It does not rewrite or summarize the tweet.
+
+## Quick start
 
 ```bash
 git clone https://github.com/ajsathyan/twitter-to-telegram-notifications.git
@@ -45,109 +115,31 @@ TELEGRAM_BOT_TOKEN=replace-with-telegram-bot-token
 TELEGRAM_CHAT_ID=-1001234567890
 ```
 
-Validate everything:
-
-```bash
-twitter-tg-notifs validate-config --config config.toml --env-file .env
-```
-
-Open the local account manager:
+Open the local console:
 
 ```bash
 twitter-tg-notifs web --config config.toml --env-file .env
 ```
 
-The web command prints the localhost URL and opens it in your default browser. Use `--no-open` on a headless machine.
+Validate config and secrets:
 
-## First Run
+```bash
+twitter-tg-notifs validate-config --config config.toml --env-file .env
+```
 
-The first real poll sets a baseline per account and does not send old posts:
+Baseline once without sending old posts:
 
 ```bash
 twitter-tg-notifs run --config config.toml --env-file .env --state-db data/state.sqlite3 --once
 ```
 
-After that, new qualifying posts are delivered within roughly the configured poll interval:
+Run continuously:
 
 ```bash
 twitter-tg-notifs run --config config.toml --env-file .env --state-db data/state.sqlite3
 ```
 
-Dry-run previews what would be sent:
-
-```bash
-twitter-tg-notifs dry-run \
-  --config config.toml \
-  --env-file .env \
-  --state-db data/state.sqlite3 \
-  --output-file artifacts/dry-run.txt
-```
-
-Dry-run does not send Telegram messages and does not mark tweets as sent. It does advance `last_seen_tweet_id`, so use a throwaway `--state-db` for no-impact experiments.
-
-## Configuration
-
-Non-secret settings live in TOML:
-
-```toml
-[polling]
-interval_seconds = 60
-timezone = "America/New_York"
-
-[x]
-exclude_replies = true
-default_include_reposts = true
-
-[classifier]
-provider = "none"
-
-[[accounts]]
-username = "account_a"
-
-[[accounts]]
-username = "noisy_account"
-include_reposts = true
-
-[accounts.topic_filter]
-enabled = true
-instructions = "Send only posts about nuclear power, AI data center electricity demand, coal exports, or utility capex."
-confidence_threshold = 0.70
-on_filter_error = "skip"
-```
-
-Secrets stay in `.env` or environment variables. The app masks secrets in CLI output.
-
-## Topic Filtering
-
-Filtering is per account. The classifier only decides relevance; it does not rewrite or summarize the tweet.
-
-Providers:
-
-- `none`: no filtering.
-- `http_json`: POST normalized tweet JSON and filter config to a local endpoint such as Hermes.
-- `xai`: call hosted xAI/Grok with `XAI_API_KEY`.
-- `openai_compatible`: call any OpenAI-compatible `/chat/completions` endpoint with optional `OPENAI_API_KEY`.
-
-Hermes/local endpoint shape:
-
-```http
-POST http://127.0.0.1:8787/classify
-```
-
-Expected strict JSON:
-
-```json
-{
-  "send": true,
-  "confidence": 0.86,
-  "matched_topics": ["AI data center electricity demand"],
-  "reason": "The post discusses electricity demand growth from AI infrastructure."
-}
-```
-
-Failure behavior is set per account with `on_filter_error = "skip" | "send" | "fallback"`.
-
-## Mini PC Install
+## Mini PC install
 
 On Ubuntu/Debian:
 
@@ -184,30 +176,44 @@ sudo systemctl status twitter-tg-notifs
 sudo journalctl -u twitter-tg-notifs -f
 ```
 
-To use the web UI on a headless mini PC:
+## Configuration model
 
-```bash
-ssh -L 4319:127.0.0.1:4319 mini-pc
-twitter-tg-notifs web --config /etc/twitter-tg-notifs/config.toml --env-file /etc/twitter-tg-notifs/.env --no-open
+Non-secret settings live in TOML:
+
+```toml
+[polling]
+interval_seconds = 60
+timezone = "America/New_York"
+
+[x]
+exclude_replies = true
+default_include_reposts = true
+
+[[accounts]]
+username = "account_a"
+
+[[accounts]]
+username = "account_b"
+include_reposts = false
 ```
 
-Then open `http://127.0.0.1:4319` on your laptop.
-
-## Operations
-
-Useful commands:
-
-```bash
-twitter-tg-notifs validate-config --config config.toml --env-file .env
-twitter-tg-notifs run --config config.toml --env-file .env --once
-twitter-tg-notifs dry-run --config config.toml --env-file .env --state-db data/test.sqlite3
-twitter-tg-notifs web --config config.toml --env-file .env
-```
+Secrets stay in `.env` or environment variables. The app masks secrets in CLI output.
 
 Local files to keep private:
 
 - `.env`: API tokens and Telegram chat ID.
 - `data/*.sqlite3`: watched account state, sent tweet IDs, classifier decisions.
+
+## Useful commands
+
+```bash
+twitter-tg-notifs validate-config --config config.toml --env-file .env
+twitter-tg-notifs web --config config.toml --env-file .env
+twitter-tg-notifs run --config config.toml --env-file .env --once
+twitter-tg-notifs dry-run --config config.toml --env-file .env --state-db data/test.sqlite3
+```
+
+Dry-run does not send Telegram messages and does not mark tweets as sent. It does advance `last_seen_tweet_id`, so use a throwaway `--state-db` for no-impact experiments.
 
 ## Development
 
