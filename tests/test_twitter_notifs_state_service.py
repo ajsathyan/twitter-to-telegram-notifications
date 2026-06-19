@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from twitter_tg_notifs.config import AccountConfig, NotifierConfig, XConfig
 from twitter_tg_notifs.models import NormalizedPost, UserRef
-from twitter_tg_notifs.service import TwitterTelegramService
+from twitter_tg_notifs.service import TwitterTelegramService, build_service, resolve_state_path
 from twitter_tg_notifs.state import SQLiteNotifierState
 from twitter_tg_notifs.telegram import TelegramDelivery
 from twitter_tg_notifs.x_client import RateLimitError
@@ -42,6 +42,31 @@ def test_sqlite_state_persists_user_last_seen_and_sent_dedupe(tmp_path):
     reopened.initialize()
     assert reopened.get_account("account").last_seen_tweet_id == "100"
     assert reopened.was_sent("200") is True
+
+
+def test_resolve_state_path_uses_config_file_directory_for_relative_paths(tmp_path):
+    config_path = tmp_path / "conf" / "config.toml"
+    config_path.parent.mkdir()
+    config = NotifierConfig(accounts=[])
+
+    assert resolve_state_path(config, config_path=config_path) == config_path.parent / "twitter-tg-notifs.sqlite3"
+    assert resolve_state_path(config, config_path=config_path, state_path=tmp_path / "explicit.sqlite3") == (
+        tmp_path / "explicit.sqlite3"
+    )
+
+
+def test_build_service_with_no_accounts_does_not_require_secrets(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[polling]\ninterval_seconds = 60\n", encoding="utf-8")
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    service = build_service(config_path=config_path, state_path=tmp_path / "state.sqlite3")
+    result = service.run_once()
+
+    assert result.checked_accounts == 0
+    assert result.errors == 0
 
 
 class FakeXClient:
@@ -122,6 +147,29 @@ def test_service_with_no_accounts_does_not_call_x_or_telegram(tmp_path):
     assert "No accounts configured" in result.status_lines[0]
 
 
+def test_service_records_poll_status_and_honors_runtime_lock(tmp_path):
+    config = NotifierConfig(accounts=[])
+    state = SQLiteNotifierState(tmp_path / "state.sqlite3")
+    state.initialize()
+    owner = state.acquire_runtime_lock("poll", ttl_seconds=300)
+    assert owner is not None
+    service = TwitterTelegramService(
+        config=config,
+        state=state,
+        x_client=ShouldNotBeCalled(),
+        telegram=ShouldNotBeCalled(),
+    )
+
+    result = service.run_once()
+    latest = state.latest_poll_result()
+    state.release_runtime_lock("poll", owner)
+
+    assert result.errors == 1
+    assert "Another notifier instance" in result.status_lines[0]
+    assert latest is not None
+    assert latest.errors == 1
+
+
 def test_service_first_run_sets_baseline_without_sending_then_sends_newer_posts(tmp_path):
     config = NotifierConfig(accounts=[AccountConfig(username="account")], x=XConfig(default_include_reposts=True))
     x_client = FakeXClient([[make_post(100), make_post(99)], [make_post(101)]])
@@ -162,7 +210,7 @@ def test_service_dry_run_does_not_send_or_mark_sent_but_advances_last_seen(tmp_p
     assert state.get_account("account").last_seen_tweet_id == "101"
 
 
-def test_service_does_not_advance_last_seen_when_delivery_fails(tmp_path):
+def test_service_advances_x_cursor_and_queues_pending_when_delivery_fails(tmp_path):
     config = NotifierConfig(accounts=[AccountConfig(username="account")])
     x_client = FakeXClient([[make_post(100)], [make_post(101)]])
     state = SQLiteNotifierState(tmp_path / "state.sqlite3")
@@ -178,7 +226,35 @@ def test_service_does_not_advance_last_seen_when_delivery_fails(tmp_path):
 
     assert result.errors == 1
     assert state.was_sent("101") is False
-    assert state.get_account("account").last_seen_tweet_id == "100"
+    assert state.get_account("account").last_seen_tweet_id == "101"
+    pending = state.pending_deliveries()
+    assert len(pending) == 1
+    assert pending[0].tweet_id == "101"
+    assert pending[0].attempts == 1
+
+
+def test_service_retries_pending_delivery_without_refetching_from_x(tmp_path):
+    config = NotifierConfig(accounts=[AccountConfig(username="account")])
+    x_client = FakeXClient([[make_post(100)], [make_post(101)], []])
+    state = SQLiteNotifierState(tmp_path / "state.sqlite3")
+    failing = TwitterTelegramService(
+        config=config,
+        state=state,
+        x_client=x_client,
+        telegram=FailingTelegram(),
+    )
+    failing.run_once()
+    failing.run_once()
+
+    telegram = FakeTelegram()
+    retrying = TwitterTelegramService(config=config, state=state, x_client=x_client, telegram=telegram)
+    result = retrying.run_once()
+
+    assert result.sent == 1
+    assert telegram.sent[0].id == "101"
+    assert state.was_sent("101") is True
+    assert state.pending_deliveries() == []
+    assert x_client.timeline_calls[-1]["since_id"] == "101"
 
 
 def test_service_honors_account_repost_setting(tmp_path):

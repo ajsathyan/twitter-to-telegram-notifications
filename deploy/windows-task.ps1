@@ -3,6 +3,7 @@ param(
     [string]$ConfigPath = "C:\ProgramData\twitter-tg-notifs\config.toml",
     [string]$EnvPath = "C:\ProgramData\twitter-tg-notifs\.env",
     [string]$StateDb = "C:\ProgramData\twitter-tg-notifs\state.sqlite3",
+    [string]$LogDir = "C:\ProgramData\twitter-tg-notifs\logs",
     [string]$TaskName = "TwitterTgNotifs"
 )
 
@@ -19,17 +20,27 @@ if (-not (Test-Path $EnvPath)) {
     throw "Cannot find env file: $EnvPath"
 }
 
+$CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$ConfigDir = Split-Path -Parent $ConfigPath
+$EnvDir = Split-Path -Parent $EnvPath
 $StateDir = Split-Path -Parent $StateDb
-New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
+$WritableDirs = @($ConfigDir, $EnvDir, $StateDir, $LogDir) | Select-Object -Unique
+foreach ($Dir in $WritableDirs) {
+    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+    icacls $Dir /grant "${CurrentUser}:(OI)(CI)M" /T | Out-Null
+}
 
 $Arguments = @(
-    "run",
-    "--config", "`"$ConfigPath`"",
-    "--env-file", "`"$EnvPath`"",
-    "--state-db", "`"$StateDb`""
+    "-ExecutionPolicy", "Bypass",
+    "-File", "`"$(Join-Path $InstallDir 'deploy\windows-run-daemon.ps1')`"",
+    "-InstallDir", "`"$InstallDir`"",
+    "-ConfigPath", "`"$ConfigPath`"",
+    "-EnvPath", "`"$EnvPath`"",
+    "-StateDb", "`"$StateDb`"",
+    "-LogDir", "`"$LogDir`""
 ) -join " "
 
-$Action = New-ScheduledTaskAction -Execute $Executable -Argument $Arguments -WorkingDirectory $InstallDir
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $Arguments -WorkingDirectory $InstallDir
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
@@ -45,3 +56,4 @@ Register-ScheduledTask `
 
 Write-Host "Registered scheduled task: $TaskName"
 Write-Host "Start it now with: Start-ScheduledTask -TaskName $TaskName"
+Write-Host "Logs: $LogDir"

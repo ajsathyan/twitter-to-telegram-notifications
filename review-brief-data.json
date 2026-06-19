@@ -1,0 +1,195 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-06-19T06:33:49Z",
+  "brief": {
+    "title": "Twitter to Telegram Notifications Release Hardening",
+    "mode": "Release",
+    "status": "Ready for final scan",
+    "summary": "Hardens daemon lifecycle, SQLite state, dry-run behavior, web status, Windows operations, README, and screenshot for the local X/Twitter to Telegram notifier."
+  },
+  "reviewItems": [
+    {
+      "id": "RB-001",
+      "title": "X fetch cursor and Telegram retry behavior",
+      "priority": "P1",
+      "role": "Eng",
+      "reviewState": "Done",
+      "workState": "Done",
+      "proofStatus": "Passed",
+      "confidence": "High confidence",
+      "why": "Telegram outages should not cause repeated X reads for the same fetched tweet.",
+      "decisionNeeded": "Confirm the pending-delivery queue is the intended cost-control tradeoff.",
+      "agentNext": "Review CU-001 and P-001/P-004 if retry behavior changes.",
+      "links": ["CU-001", "P-001", "P-004", "N-002"]
+    },
+    {
+      "id": "RB-002",
+      "title": "Daemon lifecycle and single-instance safety",
+      "priority": "P1",
+      "role": "Eng",
+      "reviewState": "Done",
+      "workState": "Done",
+      "proofStatus": "Passed",
+      "confidence": "High confidence",
+      "why": "The daemon now reloads config each poll and uses a SQLite runtime lock to avoid overlapping pollers.",
+      "decisionNeeded": "No human decision needed unless multiple daemons are intentionally desired.",
+      "agentNext": "If multi-daemon operation is required, replace the poll lock with account-level leases.",
+      "links": ["CU-001", "P-001"]
+    },
+    {
+      "id": "RB-003",
+      "title": "Dry-run and empty-startup safety",
+      "priority": "P1",
+      "role": "QA",
+      "reviewState": "Done",
+      "workState": "Done",
+      "proofStatus": "Passed",
+      "confidence": "High confidence",
+      "why": "Empty first startup and dry-run safety are critical for setup without accidentally mutating production state.",
+      "decisionNeeded": "No human decision needed.",
+      "agentNext": "Keep dry-run defaults no-impact unless a future workflow explicitly needs write-state previews.",
+      "links": ["CU-002", "P-001", "P-003", "P-004", "N-003"]
+    },
+    {
+      "id": "RB-004",
+      "title": "Windows scheduled-task operations",
+      "priority": "P2",
+      "role": "Cross-functional",
+      "reviewState": "Ready for final scan",
+      "workState": "Done",
+      "proofStatus": "Partial",
+      "confidence": "Needs judgment",
+      "why": "Windows scripts add logs and ACLs, but PowerShell was unavailable on this Mac for local script execution.",
+      "decisionNeeded": "Validate on the actual Windows mini PC only if that is the deployment target.",
+      "agentNext": "Run deploy/windows-task.ps1 from elevated PowerShell and verify logs under C:\\ProgramData\\twitter-tg-notifs\\logs.",
+      "links": ["CU-004", "P-006", "N-004"]
+    },
+    {
+      "id": "RB-005",
+      "title": "Local web console status accuracy",
+      "priority": "P2",
+      "role": "Design",
+      "reviewState": "Done",
+      "workState": "Done",
+      "proofStatus": "Passed",
+      "confidence": "High confidence",
+      "why": "The web UI now uses stored poll status, heartbeat, classifier readiness, and secrets checks instead of placeholder labels.",
+      "decisionNeeded": "No human decision needed.",
+      "agentNext": "If the status panel changes again, update the README screenshot in docs/assets/local-web-console.jpg.",
+      "links": ["CU-003", "P-001", "P-005"]
+    }
+  ],
+  "changeUnits": [
+    {
+      "id": "CU-001",
+      "title": "Daemon and SQLite lifecycle hardening",
+      "files": [
+        "src/twitter_tg_notifs/service.py",
+        "src/twitter_tg_notifs/state.py",
+        "src/twitter_tg_notifs/config.py",
+        "src/twitter_tg_notifs/classifier.py"
+      ],
+      "reason": "Add config reload, pending deliveries, daemon heartbeat, poll status, runtime lock, classifier-only secrets, and relative state-path resolution.",
+      "proof": ["P-001", "P-002", "P-003", "P-004"],
+      "reviewItems": ["RB-001", "RB-002", "RB-003"]
+    },
+    {
+      "id": "CU-002",
+      "title": "CLI dry-run and zero-account setup",
+      "files": ["src/twitter_tg_notifs/cli.py", "tests/test_twitter_notifs_cli.py"],
+      "reason": "Make dry-run no-impact by default and allow zero-account run startup without API secrets.",
+      "proof": ["P-001", "P-003", "P-004"],
+      "reviewItems": ["RB-003"]
+    },
+    {
+      "id": "CU-003",
+      "title": "Web console operational status",
+      "files": ["src/twitter_tg_notifs/web.py", "tests/test_twitter_notifs_web.py", "docs/assets/local-web-console.jpg"],
+      "reason": "Replace placeholder readiness labels with stored poll status, heartbeat, classifier status, secrets status, and invalid-config recovery.",
+      "proof": ["P-001", "P-005"],
+      "reviewItems": ["RB-005"]
+    },
+    {
+      "id": "CU-004",
+      "title": "Windows operations and docs",
+      "files": [
+        "deploy/windows-task.ps1",
+        "deploy/windows-run-daemon.ps1",
+        "README.md"
+      ],
+      "reason": "Add durable Windows logs, ProgramData ACL setup, and README mini-PC instructions.",
+      "proof": ["P-001", "P-006"],
+      "reviewItems": ["RB-004"]
+    }
+  ],
+  "notes": [
+    {
+      "id": "N-001",
+      "title": "Hermes/xAI boundary",
+      "body": "The local Hermes path uses the configured http_json endpoint directly. xAI is only used when provider or fallback_provider is configured for xai.",
+      "links": ["CU-001"]
+    },
+    {
+      "id": "N-002",
+      "title": "Remaining duplicate-delivery edge case",
+      "body": "The pending queue avoids repeated X reads after Telegram failures. It does not fully eliminate duplicate Telegram sends if the process crashes after Telegram accepts a message but before sent_tweets is recorded.",
+      "links": ["RB-001"]
+    },
+    {
+      "id": "N-003",
+      "title": "Dry-run default",
+      "body": "The dry-run command and run --dry-run both use a temporary SQLite copy by default. The dry-run command can opt into real state mutation with --write-state.",
+      "links": ["RB-003"]
+    },
+    {
+      "id": "N-004",
+      "title": "Windows local proof limit",
+      "body": "PowerShell was not available on this Mac, and the GitHub credential lacks workflow scope, so Windows script execution is deferred to a real Windows host.",
+      "links": ["RB-004", "P-006"]
+    }
+  ],
+  "proof": [
+    {
+      "id": "P-001",
+      "title": "Full unit test suite",
+      "status": "Passed",
+      "command": ".venv/bin/python -m pytest -q",
+      "result": "55 passed in 2.94s"
+    },
+    {
+      "id": "P-002",
+      "title": "Python compile check",
+      "status": "Passed",
+      "command": ".venv/bin/python -m compileall -q src tests",
+      "result": "Exited 0"
+    },
+    {
+      "id": "P-003",
+      "title": "Zero-account startup without secrets",
+      "status": "Passed",
+      "command": "env -u X_BEARER_TOKEN -u TELEGRAM_BOT_TOKEN -u TELEGRAM_CHAT_ID .venv/bin/twitter-tg-notifs run --config examples/config.toml --state-db /tmp/twitter-tg-notifs-empty-final.sqlite3 --once",
+      "result": "checked_accounts=0 baselined=0 sent=0 would_send=0 skipped=0 errors=0"
+    },
+    {
+      "id": "P-004",
+      "title": "No-impact dry-run smokes",
+      "status": "Passed",
+      "command": ".venv/bin/twitter-tg-notifs dry-run ... and .venv/bin/twitter-tg-notifs run ... --once --dry-run",
+      "result": "Both commands reported temporary state-copy usage and zero errors."
+    },
+    {
+      "id": "P-005",
+      "title": "Stale-reference grep",
+      "status": "Passed",
+      "command": "rg for old project names, placeholders, stale web labels, unfinished-marker text, and old screenshot names",
+      "result": "Only the intentional README dry-run state sentence matched."
+    },
+    {
+      "id": "P-006",
+      "title": "Windows script proof limit",
+      "status": "Partial",
+      "command": "PowerShell availability check and GitHub push attempt",
+      "result": "Local PowerShell was unavailable; GitHub rejected workflow-file updates because the OAuth credential lacks workflow scope."
+    }
+  ]
+}

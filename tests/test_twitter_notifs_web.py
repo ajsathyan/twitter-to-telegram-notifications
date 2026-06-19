@@ -58,6 +58,25 @@ def test_web_page_renders_empty_account_state(tmp_path, monkeypatch):
     assert "disabled" in html
 
 
+def test_web_page_renders_config_error_page(tmp_path):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text("[[accounts]\nusername = \"broken\"\n", encoding="utf-8")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(config_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as response:
+            html = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response.status == 200
+    assert "Fix config.toml" in html
+    assert "No settings were changed" in html
+
+
 def test_web_save_updates_reposts_and_filter_instructions(tmp_path):
     config_path = tmp_path / "notifier.toml"
     config_path.write_text(
@@ -126,6 +145,50 @@ def test_web_can_add_first_account_and_remove_last_account(tmp_path):
         thread.join(timeout=5)
 
     assert load_notifier_config(config_path).accounts == []
+
+
+def test_web_classifier_test_with_none_provider_does_not_require_notifier_secrets(tmp_path, monkeypatch):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text(
+        """
+[classifier]
+provider = "none"
+
+[[accounts]]
+username = "energythreader"
+
+[accounts.topic_filter]
+enabled = true
+instructions = "Send AI power posts."
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(config_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        csrf_token = _csrf_token(base_url)
+        body = urlencode(
+            {
+                "csrf_token": csrf_token,
+                "expanded": "energythreader",
+                "classifier_sample": "AI data center load growth.",
+            }
+        ).encode("utf-8")
+        with urlopen(Request(f"{base_url}/classifier/test", data=body, method="POST"), timeout=5) as response:
+            html = response.read().decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response.status == 200
+    assert "Classifier test complete" in html
+    assert "send (1.00)" in html
 
 
 def test_web_rejects_posts_without_csrf_token(tmp_path):

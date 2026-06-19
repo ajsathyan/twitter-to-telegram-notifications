@@ -1,8 +1,12 @@
+import os
 import stat
 from pathlib import Path
 
+import pytest
+
 from twitter_tg_notifs.config import (
     NotifierSecrets,
+    load_classifier_secrets,
     load_notifier_config,
     load_notifier_secrets,
     mask_notifier_secret,
@@ -135,6 +139,7 @@ def test_example_config_starts_without_accounts():
     assert config.accounts == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not portable to Windows")
 def test_save_notifier_config_preserves_existing_file_mode(tmp_path):
     config_path = tmp_path / "notifier.toml"
     config_path.write_text(
@@ -197,6 +202,20 @@ def test_load_notifier_secrets_prefers_environment_over_env_file(tmp_path, monke
     assert secrets.x_bearer_token.get_secret_value() == "x-from-env"
     assert secrets.telegram_bot_token.get_secret_value() == "telegram-from-file"
     assert secrets.telegram_chat_id.get_secret_value() == "-100123"
+    assert secrets.xai_api_key is not None
+    assert secrets.xai_api_key.get_secret_value() == "xai-from-file"
+
+
+def test_load_classifier_secrets_does_not_require_x_or_telegram(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("XAI_API_KEY=xai-from-file\n", encoding="utf-8")
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+
+    secrets = load_classifier_secrets(env_file=env_file)
+
     assert secrets.xai_api_key is not None
     assert secrets.xai_api_key.get_secret_value() == "xai-from-file"
 

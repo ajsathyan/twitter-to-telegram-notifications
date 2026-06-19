@@ -22,6 +22,8 @@ No scraping. No X password. No backlog spam. The daemon polls configured X accou
 - Reply exclusion globally and repost controls per account.
 - Optional topic filtering for noisy accounts through Hermes, xAI/Grok, or any OpenAI-compatible endpoint.
 - A small Python daemon that runs comfortably under `systemd` on a low-resource Linux box.
+- Config reload on every poll, so account changes made in the web UI are picked up without restarting the daemon.
+- A SQLite pending-delivery queue, so Telegram outages do not force repeated X reads for the same fetched tweet.
 
 ## Using this with an AI agent
 
@@ -53,6 +55,7 @@ ssh -L 4319:127.0.0.1:4319 mini-pc
 /opt/twitter-tg-notifs/.venv/bin/twitter-tg-notifs web \
   --config /etc/twitter-tg-notifs/config.toml \
   --env-file /etc/twitter-tg-notifs/.env \
+  --state-db /var/lib/twitter-tg-notifs/state.sqlite3 \
   --no-open
 ```
 
@@ -134,10 +137,10 @@ TELEGRAM_CHAT_ID=-1001234567890
 Open the local console:
 
 ```bash
-twitter-tg-notifs web --config config.toml --env-file .env
+twitter-tg-notifs web --config config.toml --env-file .env --state-db data/state.sqlite3
 ```
 
-The example config starts with no accounts. Add accounts in the web console, set reposts Yes/No per row, and expand an account only when you want topic-filter instructions.
+The example config starts with no accounts. Add accounts in the web console, set reposts Yes/No per row, and expand an account only when you want topic-filter instructions. The daemon reloads config on each poll, so saved account changes are picked up automatically.
 
 Validate config and secrets:
 
@@ -220,7 +223,8 @@ Open the local console:
 ```powershell
 .\.venv\Scripts\twitter-tg-notifs.exe web `
   --config C:\ProgramData\twitter-tg-notifs\config.toml `
-  --env-file C:\ProgramData\twitter-tg-notifs\.env
+  --env-file C:\ProgramData\twitter-tg-notifs\.env `
+  --state-db C:\ProgramData\twitter-tg-notifs\state.sqlite3
 ```
 
 Register the always-on daemon as a scheduled task from an elevated PowerShell window:
@@ -229,6 +233,7 @@ Register the always-on daemon as a scheduled task from an elevated PowerShell wi
 powershell -ExecutionPolicy Bypass -File .\deploy\windows-task.ps1
 Start-ScheduledTask -TaskName TwitterTgNotifs
 Get-ScheduledTask -TaskName TwitterTgNotifs
+Get-Content C:\ProgramData\twitter-tg-notifs\logs\daemon-*.log -Tail 80
 ```
 
 ## Configuration model
@@ -257,18 +262,18 @@ Secrets stay in `.env` or environment variables. The app masks secrets in CLI ou
 Local files to keep private:
 
 - `.env`: API tokens and Telegram chat ID.
-- `data/*.sqlite3`: watched account state, sent tweet IDs, classifier decisions.
+- `data/*.sqlite3`: watched account state, sent tweet IDs, pending deliveries, classifier decisions, and poll status.
 
 ## Useful commands
 
 ```bash
 twitter-tg-notifs validate-config --config config.toml --env-file .env
-twitter-tg-notifs web --config config.toml --env-file .env
+twitter-tg-notifs web --config config.toml --env-file .env --state-db data/state.sqlite3
 twitter-tg-notifs run --config config.toml --env-file .env --once
 twitter-tg-notifs dry-run --config config.toml --env-file .env --state-db data/test.sqlite3
 ```
 
-Dry-run does not send Telegram messages and does not mark tweets as sent. It does advance `last_seen_tweet_id`, so use a throwaway `--state-db` for no-impact experiments.
+Dry-run does not send Telegram messages and does not mark tweets as sent. By default it uses a temporary copy of the state DB, so it does not change production state. Pass `--write-state` only when you explicitly want dry-run to advance the real SQLite state.
 
 ## Development
 

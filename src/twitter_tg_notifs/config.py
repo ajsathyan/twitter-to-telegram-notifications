@@ -240,6 +240,15 @@ class NotifierSecrets(BaseModel):
         return mask_notifier_secret(value)
 
 
+class ClassifierSecrets(BaseModel):
+    xai_api_key: SecretStr | None = Field(default=None, repr=False)
+    openai_api_key: SecretStr | None = Field(default=None, repr=False)
+
+    @field_serializer("xai_api_key", "openai_api_key")
+    def serialize_secret(self, value: SecretStr | None) -> str:
+        return mask_notifier_secret(value)
+
+
 def load_notifier_config(path: Path | str) -> NotifierConfig:
     config_path = Path(path)
     with config_path.open("rb") as handle:
@@ -248,18 +257,7 @@ def load_notifier_config(path: Path | str) -> NotifierConfig:
 
 
 def load_notifier_secrets(env_file: Path | str | None = None) -> NotifierSecrets:
-    values: dict[str, str] = {}
-    if env_file is not None:
-        path = Path(env_file)
-        if path.exists() and not path.is_file():
-            raise ValueError(f"Env path must be a file: {path}")
-        if path.is_file():
-            values.update({key: value for key, value in dotenv_values(path).items() if isinstance(value, str)})
-
-    for key in ("X_BEARER_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "XAI_API_KEY", "OPENAI_API_KEY"):
-        env_value = os.environ.get(key)
-        if env_value:
-            values[key] = env_value
+    values = _load_env_values(env_file)
 
     missing = [
         key
@@ -276,3 +274,27 @@ def load_notifier_secrets(env_file: Path | str | None = None) -> NotifierSecrets
         xai_api_key=values.get("XAI_API_KEY"),
         openai_api_key=values.get("OPENAI_API_KEY"),
     )
+
+
+def load_classifier_secrets(env_file: Path | str | None = None) -> ClassifierSecrets:
+    values = _load_env_values(env_file)
+    return ClassifierSecrets(
+        xai_api_key=values.get("XAI_API_KEY"),
+        openai_api_key=values.get("OPENAI_API_KEY"),
+    )
+
+
+def _load_env_values(env_file: Path | str | None = None) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if env_file is not None:
+        path = Path(env_file)
+        if path.exists() and not path.is_file():
+            raise ValueError(f"Env path must be a file: {path}")
+        if path.is_file():
+            values.update({key: value for key, value in dotenv_values(path).items() if isinstance(value, str)})
+
+    for key in ("X_BEARER_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "XAI_API_KEY", "OPENAI_API_KEY"):
+        env_value = os.environ.get(key)
+        if env_value:
+            values[key] = env_value
+    return values

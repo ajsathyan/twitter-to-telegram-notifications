@@ -19,11 +19,14 @@ from twitter_tg_notifs.config import (
     AccountConfig,
     NotifierConfig,
     TopicFilterConfig,
+    load_classifier_secrets,
     load_notifier_config,
     load_notifier_secrets,
     save_notifier_config,
 )
 from twitter_tg_notifs.models import NormalizedPost, UserRef
+from twitter_tg_notifs.service import resolve_state_path
+from twitter_tg_notifs.state import PollRunState, SQLiteNotifierState
 
 
 DEFAULT_WEB_HOST = "127.0.0.1"
@@ -34,13 +37,14 @@ DEFAULT_WEB_PORT = 4319
 class WebServerOptions:
     config_path: Path
     env_file: Path | None = None
+    state_path: Path | None = None
     host: str = DEFAULT_WEB_HOST
     port: int = DEFAULT_WEB_PORT
     open_browser: bool = True
 
 
 def run_web_console(options: WebServerOptions) -> None:
-    handler = _make_handler(options.config_path, env_file=options.env_file)
+    handler = _make_handler(options.config_path, env_file=options.env_file, state_path=options.state_path)
     server = ThreadingHTTPServer((options.host, options.port), handler)
     url = f"http://{options.host}:{server.server_port}"
     print(f"Web console: {url}", flush=True)
@@ -55,7 +59,7 @@ def run_web_console(options: WebServerOptions) -> None:
         server.server_close()
 
 
-def _make_handler(config_path: Path, *, env_file: Path | None = None):
+def _make_handler(config_path: Path, *, env_file: Path | None = None, state_path: Path | None = None):
     csrf_token = secrets.token_urlsafe(24)
 
     class WebConsoleHandler(BaseHTTPRequestHandler):
@@ -65,15 +69,24 @@ def _make_handler(config_path: Path, *, env_file: Path | None = None):
             parsed = urlparse(self.path)
             if parsed.path == "/":
                 query = parse_qs(parsed.query)
+                try:
+                    config = _load_config()
+                except (OSError, ValueError) as exc:
+                    self._send_html(_render_config_error_page(config_path, exc))
+                    return
                 self._send_html(
                     _render_page(
-                        _load_config(),
+                        config,
                         csrf_token=csrf_token,
                         expanded=_first(query.get("expanded")),
                         notice=_first(query.get("notice")),
                         error=_first(query.get("error")),
                         classifier_result=_first(query.get("classifier_result")),
                         classifier_reason=_first(query.get("classifier_reason")),
+                        secrets_status=_secrets_status(),
+                        classifier_status=_classifier_status(config),
+                        latest_poll=_latest_poll(config),
+                        daemon_alive=_daemon_heartbeat_alive(config),
                     )
                 )
                 return
@@ -207,7 +220,7 @@ def _make_handler(config_path: Path, *, env_file: Path | None = None):
     def _run_classifier_test(config: NotifierConfig, account: AccountConfig, sample_text: str):
         if account.topic_filter is None or not account.topic_filter.enabled:
             raise ValueError(f"@{account.username} does not have filter instructions enabled.")
-        secrets_for_classifier = load_notifier_secrets(env_file=env_file)
+        secrets_for_classifier = load_classifier_secrets(env_file=env_file)
         primary, fallback = build_classifier_pair(config.classifier, secrets_for_classifier)
         post = NormalizedPost(
             id="web-test",
@@ -224,7 +237,66 @@ def _make_handler(config_path: Path, *, env_file: Path | None = None):
             fallback=fallback,
         )
 
+    def _state(config: NotifierConfig) -> SQLiteNotifierState:
+        state = SQLiteNotifierState(resolve_state_path(config, config_path=config_path, state_path=state_path))
+        state.initialize()
+        return state
+
+    def _latest_poll(config: NotifierConfig) -> PollRunState | None:
+        try:
+            return _state(config).latest_poll_result()
+        except OSError:
+            return None
+
+    def _daemon_heartbeat_alive(config: NotifierConfig) -> bool:
+        try:
+            return _state(config).daemon_heartbeat_alive()
+        except OSError:
+            return False
+
+    def _secrets_status() -> dict[str, str]:
+        try:
+            load_notifier_secrets(env_file=env_file)
+        except ValueError as exc:
+            return {"class": "bad", "label": f"missing secrets: {exc}"}
+        except OSError as exc:
+            return {"class": "bad", "label": f"env error: {exc}"}
+        return {"class": "ok", "label": "configured"}
+
+    def _classifier_status(config: NotifierConfig) -> dict[str, str]:
+        try:
+            secrets_for_classifier = load_classifier_secrets(env_file=env_file)
+            build_classifier_pair(config.classifier, secrets_for_classifier)
+        except (OSError, ValueError) as exc:
+            return {"class": "bad", "label": str(exc)}
+        if config.classifier.provider == "none":
+            return {"class": "warn", "label": "off"}
+        return {"class": "ok", "label": "configured"}
+
     return WebConsoleHandler
+
+
+def _render_config_error_page(config_path: Path, error: BaseException) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Config error</title>
+  <style>{_CSS}</style>
+</head>
+<body>
+  <main class="page narrow-page">
+    <div class="config-error">
+      <div class="eyebrow">Config error</div>
+      <h1>Fix config.toml</h1>
+      <p>The web console could not load <span class="path-chip">{_e(config_path)}</span>.</p>
+      <pre>{_e(error)}</pre>
+      <p>Fix the TOML file, then refresh this page. No settings were changed.</p>
+    </div>
+  </main>
+</body>
+</html>"""
 
 
 def _render_page(
@@ -236,13 +308,17 @@ def _render_page(
     error: str = "",
     classifier_result: str = "",
     classifier_reason: str = "",
+    secrets_status: dict[str, str] | None = None,
+    classifier_status: dict[str, str] | None = None,
+    latest_poll: PollRunState | None = None,
+    daemon_alive: bool = False,
 ) -> str:
     if expanded and expanded not in {account.username for account in config.accounts}:
         expanded = ""
     if not expanded and config.accounts:
         filtered = [account.username for account in config.accounts if _has_filter(account)]
         expanded = filtered[0] if filtered else ""
-    daemon = _daemon_status()
+    daemon = _daemon_status(daemon_alive=daemon_alive)
     expanded_account = _account_by_username(config, expanded) if expanded else None
     return f"""<!doctype html>
 <html lang="en">
@@ -295,8 +371,8 @@ def _render_page(
         </form>
       </section>
       <aside class="rail">
-        {_render_service_status(config, daemon)}
-        {_render_classifier_card(config, expanded_account, csrf_token, classifier_result, classifier_reason)}
+        {_render_service_status(config, daemon, latest_poll, secrets_status or {'class': 'bad', 'label': 'unknown'})}
+        {_render_classifier_card(config, expanded_account, csrf_token, classifier_result, classifier_reason, classifier_status or {'class': 'bad', 'label': 'unknown'})}
       </aside>
     </section>
   </main>
@@ -323,7 +399,7 @@ def _render_account_row(account: AccountConfig, config: NotifierConfig, expanded
     include = account.effective_include_reposts(config.x.default_include_reposts)
     selected = account.username == expanded
     filter_text = "Yes" if _has_filter(account) else "No"
-    status = "Needs save" if selected else "Healthy"
+    status = "Editing" if selected else "Configured"
     action = "Close" if selected else "Open"
     action_href = "/" if selected else f"/?{urlencode({'expanded': account.username})}"
     return f"""
@@ -377,14 +453,30 @@ def _render_filter_editor(account: AccountConfig | None) -> str:
 </div>"""
 
 
-def _render_service_status(config: NotifierConfig, daemon: dict[str, str]) -> str:
+def _render_service_status(
+    config: NotifierConfig,
+    daemon: dict[str, str],
+    latest_poll: PollRunState | None,
+    secrets_status: dict[str, str],
+) -> str:
+    poll_label = "never"
+    error_label = "0"
+    rate_limit_row = ""
+    if latest_poll is not None:
+        poll_label = latest_poll.ran_at
+        error_label = str(latest_poll.errors)
+        if latest_poll.rate_limited_until is not None:
+            reset_time = datetime.fromtimestamp(latest_poll.rate_limited_until, tz=timezone.utc).isoformat()
+            rate_limit_row = f"<div><dt>X backoff</dt><dd>{_e(reset_time)}</dd></div>"
     return f"""
 <section class="rail-card light">
   <div class="rail-heading"><div class="eyebrow">Service status</div><span class="mini-status {daemon['class']}"><span></span>{daemon['short']}</span></div>
   <dl>
     <div><dt>Poll interval</dt><dd>{config.polling.interval_seconds}s</dd></div>
-    <div><dt>Last poll</dt><dd>state-backed</dd></div>
-    <div><dt>Telegram</dt><dd>configured</dd></div>
+    <div><dt>Last poll</dt><dd>{_e(poll_label)}</dd></div>
+    <div><dt>Last errors</dt><dd>{_e(error_label)}</dd></div>
+    {rate_limit_row}
+    <div><dt>Secrets</dt><dd class="{_e(secrets_status['class'])}">{_e(secrets_status['label'])}</dd></div>
   </dl>
 </section>"""
 
@@ -395,6 +487,7 @@ def _render_classifier_card(
     csrf_token: str,
     classifier_result: str,
     classifier_reason: str,
+    classifier_status: dict[str, str],
 ) -> str:
     target = f"@{account.username}" if account else "selected account"
     disabled = "" if account and _has_filter(account) else "disabled"
@@ -402,7 +495,7 @@ def _render_classifier_card(
     reason = classifier_reason or "Run a sample against the selected account filter."
     return f"""
 <section class="rail-card dark-card">
-  <div class="rail-heading"><div><div class="eyebrow amber">Classifier test</div><h3>{_e(config.classifier.provider)}</h3></div><span class="mini-status ok"><span></span>ready</span></div>
+  <div class="rail-heading"><div><div class="eyebrow amber">Classifier test</div><h3>{_e(config.classifier.provider)}</h3></div><span class="mini-status {classifier_status['class']}"><span></span>{_e(classifier_status['label'])}</span></div>
   <form method="post" action="/classifier/test" class="classifier-form">
     <input type="hidden" name="csrf_token" value="{_e(csrf_token)}">
     <input type="hidden" name="expanded" value="{_e(account.username if account else '')}">
@@ -425,8 +518,8 @@ def _render_notice(notice: str, error: str) -> str:
     return ""
 
 
-def _daemon_status() -> dict[str, str]:
-    running = _is_daemon_process_running()
+def _daemon_status(*, daemon_alive: bool = False) -> dict[str, str]:
+    running = daemon_alive or _is_daemon_process_running()
     return {
         "class": "ok" if running else "bad",
         "label": "Daemon ready" if running else "Daemon stopped",
@@ -596,6 +689,24 @@ input { height: 36px; padding: 0 10px; width: 150px; }
 }
 .ok { color: var(--green); }
 .bad { color: var(--red); }
+.warn { color: #80510a; }
+.narrow-page { max-width: 820px; }
+.config-error {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 24px;
+  background: var(--soft);
+}
+.config-error h1 { margin-top: 8px; }
+.config-error p { color: var(--muted); font-size: 15px; line-height: 23px; }
+.config-error pre {
+  overflow: auto;
+  border: 1px solid #c8d0d8;
+  border-radius: 7px;
+  background: #fff;
+  padding: 14px;
+  white-space: pre-wrap;
+}
 .table-row {
   display: grid;
   grid-template-columns: 178px 136px 70px 96px 108px;

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 import requests
 
-from twitter_tg_notifs.config import ClassifierConfig, NotifierSecrets, TopicFilterConfig
+from twitter_tg_notifs.config import ClassifierConfig, ClassifierSecrets, NotifierSecrets, TopicFilterConfig
 from twitter_tg_notifs.models import NormalizedPost
 
 
@@ -173,13 +173,13 @@ def classify_with_policy(
     return _threshold(decision, topic_filter)
 
 
-def build_classifier_pair(config: ClassifierConfig, secrets: NotifierSecrets):
+def build_classifier_pair(config: ClassifierConfig, secrets: NotifierSecrets | ClassifierSecrets):
     return _build_classifier(config.provider, config, secrets), (
         _build_classifier(config.fallback_provider, config, secrets) if config.fallback_provider else None
     )
 
 
-def _build_classifier(provider: str | None, config: ClassifierConfig, secrets: NotifierSecrets):
+def _build_classifier(provider: str | None, config: ClassifierConfig, secrets: NotifierSecrets | ClassifierSecrets):
     if provider in (None, "none"):
         return NoneClassifier()
     if provider == "http_json":

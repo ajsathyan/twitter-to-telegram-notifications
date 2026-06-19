@@ -106,9 +106,59 @@ def test_twitter_notifs_dry_run_uses_service_once(tmp_path, monkeypatch, capsys)
     assert exit_code == 0
     assert calls["dry_run"] is True
     assert calls["build_dry_run"] is True
-    assert calls["state_path"] == state_path
+    assert calls["state_path"] != state_path
+    assert calls["state_path"].name == "dry-run.sqlite3"
     assert "Would send @account status 123" in captured.out
     assert "would_send=2" in captured.out
+    assert "temporary state copy" in captured.out
+
+
+def test_twitter_notifs_dry_run_can_write_state_when_explicit(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "notifier.toml"
+    env_path = tmp_path / ".env"
+    state_path = tmp_path / "state.sqlite3"
+    config_path.write_text("[[accounts]]\nusername = \"account\"\n", encoding="utf-8")
+    env_path.write_text(
+        "X_BEARER_TOKEN=x\nTELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=c\n",
+        encoding="utf-8",
+    )
+    calls = {}
+
+    class FakeService:
+        def run_once(self, dry_run=False):
+            return SimpleNamespace(
+                checked_accounts=1,
+                baselined=0,
+                sent=0,
+                would_send=0,
+                skipped=0,
+                errors=0,
+                status_lines=[],
+            )
+
+    def fake_build_service(*, config_path, env_file, state_path, dry_run=False):
+        calls["state_path"] = state_path
+        return FakeService()
+
+    monkeypatch.setattr("twitter_tg_notifs.cli.build_service", fake_build_service)
+
+    exit_code = main(
+        [
+            "dry-run",
+            "--config",
+            str(config_path),
+            "--env-file",
+            str(env_path),
+            "--state-db",
+            str(state_path),
+            "--write-state",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert calls["state_path"] == state_path
+    assert "temporary state copy" not in captured.out
 
 
 def test_twitter_notifs_dry_run_can_save_output_file(tmp_path, monkeypatch):
@@ -169,9 +219,61 @@ def test_twitter_notifs_run_once_command_reports_clean_errors(tmp_path, monkeypa
     assert "Traceback" not in captured.err
 
 
+def test_twitter_notifs_run_once_dry_run_uses_temp_state(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "notifier.toml"
+    state_path = tmp_path / "state.sqlite3"
+    config_path.write_text("[[accounts]]\nusername = \"account\"\n", encoding="utf-8")
+    calls = {}
+
+    class FakeService:
+        def run_once(self, dry_run=False):
+            calls["dry_run"] = dry_run
+            return SimpleNamespace(
+                checked_accounts=1,
+                baselined=0,
+                sent=0,
+                would_send=1,
+                skipped=0,
+                errors=0,
+                status_lines=[],
+            )
+
+    def fake_build_service(*, config_path, env_file, state_path, dry_run=False):
+        calls["state_path"] = state_path
+        calls["build_dry_run"] = dry_run
+        return FakeService()
+
+    monkeypatch.setattr("twitter_tg_notifs.cli.build_service", fake_build_service)
+
+    exit_code = main(["run", "--config", str(config_path), "--state-db", str(state_path), "--once", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert calls["dry_run"] is True
+    assert calls["build_dry_run"] is True
+    assert calls["state_path"] != state_path
+    assert calls["state_path"].name == "dry-run.sqlite3"
+    assert "temporary state copy" in captured.out
+
+
+def test_twitter_notifs_run_once_with_zero_accounts_does_not_require_secrets(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text("[polling]\ninterval_seconds = 60\n", encoding="utf-8")
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    exit_code = main(["run", "--config", str(config_path), "--once"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "No accounts configured" in captured.out
+
+
 def test_twitter_notifs_web_command_prints_and_can_skip_browser(tmp_path, monkeypatch):
     config_path = tmp_path / "notifier.toml"
     env_path = tmp_path / ".env"
+    state_path = tmp_path / "state.sqlite3"
     config_path.write_text("[[accounts]]\nusername = \"account\"\n", encoding="utf-8")
     env_path.write_text("X_BEARER_TOKEN=x\nTELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=c\n", encoding="utf-8")
     captured = {}
@@ -182,11 +284,23 @@ def test_twitter_notifs_web_command_prints_and_can_skip_browser(tmp_path, monkey
     monkeypatch.setattr("twitter_tg_notifs.cli.run_web_console", fake_run_web_console)
 
     exit_code = main(
-        ["web", "--config", str(config_path), "--env-file", str(env_path), "--port", "0", "--no-open"]
+        [
+            "web",
+            "--config",
+            str(config_path),
+            "--env-file",
+            str(env_path),
+            "--state-db",
+            str(state_path),
+            "--port",
+            "0",
+            "--no-open",
+        ]
     )
 
     assert exit_code == 0
     assert captured["options"].config_path == config_path
     assert captured["options"].env_file == env_path
+    assert captured["options"].state_path == state_path
     assert captured["options"].port == 0
     assert captured["options"].open_browser is False

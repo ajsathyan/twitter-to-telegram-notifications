@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/review-brief-data.schema.json",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "brief", "reviewItems", "changeUnits", "notes", "proof"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "generatedAt": { "type": "string" },
+    "brief": {
+      "type": "object",
+      "required": ["title", "mode", "status", "summary"],
+      "properties": {
+        "title": { "type": "string" },
+        "mode": { "type": "string" },
+        "status": { "type": "string" },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "reviewItems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "priority",
+          "role",
+          "reviewState",
+          "workState",
+          "proofStatus",
+          "confidence",
+          "why",
+          "decisionNeeded",
+          "agentNext",
+          "links"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^RB-[0-9]{3}$" },
+          "title": { "type": "string" },
+          "priority": { "enum": ["P0", "P1", "P2", "P3"] },
+          "role": { "enum": ["PM", "Design", "Eng", "QA", "Cross-functional"] },
+          "reviewState": {
+            "enum": ["Needs decision", "Needs proof", "Blocked", "Ready for final scan", "Done", "Tombstoned"]
+          },
+          "workState": { "enum": ["Backlog", "Ready", "In Progress", "In Review", "Blocked", "Done"] },
+          "proofStatus": { "enum": ["Missing", "Partial", "Passed", "Failed", "Not Applicable"] },
+          "confidence": { "enum": ["High confidence", "Needs judgment", "Risk unclear", "Proof missing"] },
+          "why": { "type": "string" },
+          "decisionNeeded": { "type": "string" },
+          "agentNext": { "type": "string" },
+          "links": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "changeUnits": { "type": "array", "items": { "type": "object" } },
+    "notes": { "type": "array", "items": { "type": "object" } },
+    "proof": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": false
+}
