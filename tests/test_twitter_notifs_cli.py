@@ -38,6 +38,25 @@ username = "account"
     assert "-100123456" not in captured.out
 
 
+def test_twitter_notifs_validate_config_accepts_zero_accounts(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "notifier.toml"
+    env_path = tmp_path / ".env"
+    config_path.write_text("[polling]\ninterval_seconds = 60\n", encoding="utf-8")
+    env_path.write_text(
+        "X_BEARER_TOKEN=x\nTELEGRAM_BOT_TOKEN=t\nTELEGRAM_CHAT_ID=c\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    exit_code = main(["validate-config", "--config", str(config_path), "--env-file", str(env_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "0 accounts" in captured.out
+
+
 def test_twitter_notifs_dry_run_uses_service_once(tmp_path, monkeypatch, capsys):
     config_path = tmp_path / "notifier.toml"
     env_path = tmp_path / ".env"

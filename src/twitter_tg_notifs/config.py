@@ -114,12 +114,10 @@ class NotifierConfig(BaseModel):
     x: XConfig = Field(default_factory=XConfig)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
     state: StateConfig = Field(default_factory=StateConfig)
-    accounts: list[AccountConfig]
+    accounts: list[AccountConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_accounts(self) -> "NotifierConfig":
-        if not self.accounts:
-            raise ValueError("at least one account is required")
         seen: set[str] = set()
         for account in self.accounts:
             if account.username in seen:

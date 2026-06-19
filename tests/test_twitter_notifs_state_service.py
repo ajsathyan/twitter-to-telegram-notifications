@@ -99,6 +99,29 @@ class FailingTelegram:
         raise OSError("telegram unavailable")
 
 
+class ShouldNotBeCalled:
+    def __getattr__(self, name):
+        raise AssertionError(f"{name} should not be called")
+
+
+def test_service_with_no_accounts_does_not_call_x_or_telegram(tmp_path):
+    config = NotifierConfig(accounts=[])
+    state = SQLiteNotifierState(tmp_path / "state.sqlite3")
+    service = TwitterTelegramService(
+        config=config,
+        state=state,
+        x_client=ShouldNotBeCalled(),
+        telegram=ShouldNotBeCalled(),
+    )
+
+    result = service.run_once()
+
+    assert result.checked_accounts == 0
+    assert result.sent == 0
+    assert result.errors == 0
+    assert "No accounts configured" in result.status_lines[0]
+
+
 def test_service_first_run_sets_baseline_without_sending_then_sends_newer_posts(tmp_path):
     config = NotifierConfig(accounts=[AccountConfig(username="account")], x=XConfig(default_include_reposts=True))
     x_client = FakeXClient([[make_post(100), make_post(99)], [make_post(101)]])

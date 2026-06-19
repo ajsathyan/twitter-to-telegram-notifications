@@ -22,26 +22,28 @@ provider = "none"
 [state]
 path = "data/twitter-tg-notifs.sqlite3"
 
-[[accounts]]
-username = "account_a"
-
-[[accounts]]
-username = "account_b"
-include_reposts = false
-
-[[accounts]]
-username = "noisy_account"
-include_reposts = true
-
-[accounts.topic_filter]
-enabled = true
-instructions = "Send only when the post is materially about nuclear power, AI data center electricity demand, coal exports, or utility capex. Skip broad market commentary."
-topics = [
-  "nuclear power",
-  "AI data center electricity demand",
-  "coal exports",
-  "utility capex",
-]
-mode = "any"
-confidence_threshold = 0.70
-on_filter_error = "skip"
+# Start empty, then add accounts in the local web console.
+#
+# [[accounts]]
+# username = "account_a"
+#
+# [[accounts]]
+# username = "account_b"
+# include_reposts = false
+#
+# [[accounts]]
+# username = "noisy_account"
+# include_reposts = true
+#
+# [accounts.topic_filter]
+# enabled = true
+# instructions = "Send only when the post is materially about nuclear power, AI data center electricity demand, coal exports, or utility capex. Skip broad market commentary."
+# topics = [
+#   "nuclear power",
+#   "AI data center electricity demand",
+#   "coal exports",
+#   "utility capex",
+# ]
+# mode = "any"
+# confidence_threshold = 0.70
+# on_filter_error = "skip"

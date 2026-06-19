@@ -51,6 +51,9 @@ class TwitterTelegramService:
     def run_once(self, *, dry_run: bool = False) -> PollResult:
         self.state.initialize()
         result = PollResult()
+        if not self.config.accounts:
+            result.status_lines.append("No accounts configured. Add accounts in the web console or config.toml.")
+            return result
         for account in self.config.accounts:
             result.checked_accounts += 1
             include_reposts = account.effective_include_reposts(self.config.x.default_include_reposts)

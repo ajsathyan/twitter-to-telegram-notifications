@@ -16,6 +16,7 @@ No scraping. No X password. No backlog spam. The daemon polls configured X accou
 ## What you get
 
 - A local web console for adding accounts, removing accounts, toggling reposts, and editing per-account filter instructions.
+- An empty first-run config, so you can start the web UI first and add accounts when you are ready.
 - First-run baselining so old posts do not flood Telegram.
 - Clean Telegram messages with account links, Open on X links, expanded shared links, quotes, reposts, polls, photos, and video fallbacks.
 - Reply exclusion globally and repost controls per account.
@@ -136,6 +137,8 @@ Open the local console:
 twitter-tg-notifs web --config config.toml --env-file .env
 ```
 
+The example config starts with no accounts. Add accounts in the web console, set reposts Yes/No per row, and expand an account only when you want topic-filter instructions.
+
 Validate config and secrets:
 
 ```bash
@@ -189,6 +192,43 @@ sudo systemctl enable --now twitter-tg-notifs
 
 sudo systemctl status twitter-tg-notifs
 sudo journalctl -u twitter-tg-notifs -f
+```
+
+## Windows 11 mini PC install
+
+The Python code is cross-platform. On Windows 11, use Task Scheduler instead of `systemd`.
+
+PowerShell setup:
+
+```powershell
+git clone https://github.com/ajsathyan/twitter-to-telegram-notifications.git C:\twitter-tg-notifs
+cd C:\twitter-tg-notifs
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -e .
+
+New-Item -ItemType Directory -Force C:\ProgramData\twitter-tg-notifs
+Copy-Item examples\config.toml C:\ProgramData\twitter-tg-notifs\config.toml
+Copy-Item examples\.env.example C:\ProgramData\twitter-tg-notifs\.env
+notepad C:\ProgramData\twitter-tg-notifs\.env
+notepad C:\ProgramData\twitter-tg-notifs\config.toml
+```
+
+Open the local console:
+
+```powershell
+.\.venv\Scripts\twitter-tg-notifs.exe web `
+  --config C:\ProgramData\twitter-tg-notifs\config.toml `
+  --env-file C:\ProgramData\twitter-tg-notifs\.env
+```
+
+Register the always-on daemon as a scheduled task from an elevated PowerShell window:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\windows-task.ps1
+Start-ScheduledTask -TaskName TwitterTgNotifs
+Get-ScheduledTask -TaskName TwitterTgNotifs
 ```
 
 ## Configuration model

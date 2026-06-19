@@ -111,6 +111,30 @@ on_filter_error = "skip"
     assert loaded.accounts[0].topic_filter.confidence_threshold == 0.8
 
 
+def test_load_notifier_config_allows_empty_account_list(tmp_path):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text(
+        """
+[polling]
+interval_seconds = 60
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_notifier_config(config_path)
+
+    assert config.accounts == []
+    rendered = config_path.with_name("rendered.toml")
+    save_notifier_config(config, rendered)
+    assert "[[accounts]]" not in rendered.read_text(encoding="utf-8")
+
+
+def test_example_config_starts_without_accounts():
+    config = load_notifier_config(Path("examples/config.toml"))
+
+    assert config.accounts == []
+
+
 def test_save_notifier_config_preserves_existing_file_mode(tmp_path):
     config_path = tmp_path / "notifier.toml"
     config_path.write_text(

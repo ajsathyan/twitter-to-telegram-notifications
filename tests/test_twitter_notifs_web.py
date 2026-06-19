@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from twitter_tg_notifs.config import load_notifier_config
-from twitter_tg_notifs.web import _make_handler, _render_page
+from twitter_tg_notifs.web import _make_handler, _process_list_commands, _render_page
 
 
 def test_web_page_renders_radio_reposts_and_filter_yes_no(tmp_path, monkeypatch):
@@ -43,6 +43,19 @@ username = "coaldesk"
     assert "Daemon ready" in html
     assert ">Yes<" in html
     assert ">No<" in html
+
+
+def test_web_page_renders_empty_account_state(tmp_path, monkeypatch):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text("[polling]\ninterval_seconds = 60\n", encoding="utf-8")
+    monkeypatch.setattr("twitter_tg_notifs.web._is_daemon_process_running", lambda: False)
+
+    html = _render_page(load_notifier_config(config_path))
+
+    assert "No accounts yet" in html
+    assert "Add your first @username above" in html
+    assert "Test selected filter" in html
+    assert "disabled" in html
 
 
 def test_web_save_updates_reposts_and_filter_instructions(tmp_path):
@@ -87,6 +100,34 @@ include_reposts = true
     assert account.topic_filter.instructions == "Send only utility capex posts."
 
 
+def test_web_can_add_first_account_and_remove_last_account(tmp_path):
+    config_path = tmp_path / "notifier.toml"
+    config_path.write_text("[polling]\ninterval_seconds = 60\n", encoding="utf-8")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(config_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        csrf_token = _csrf_token(base_url)
+        add_body = urlencode({"csrf_token": csrf_token, "username": "energythreader"}).encode("utf-8")
+        with urlopen(Request(f"{base_url}/accounts/add", data=add_body, method="POST"), timeout=5) as response:
+            assert response.status in (200, 303)
+
+        config = load_notifier_config(config_path)
+        assert [account.username for account in config.accounts] == ["energythreader"]
+
+        csrf_token = _csrf_token(base_url)
+        remove_body = urlencode({"csrf_token": csrf_token, "username": "energythreader"}).encode("utf-8")
+        with urlopen(Request(f"{base_url}/accounts/remove", data=remove_body, method="POST"), timeout=5) as response:
+            assert response.status in (200, 303)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert load_notifier_config(config_path).accounts == []
+
+
 def test_web_rejects_posts_without_csrf_token(tmp_path):
     config_path = tmp_path / "notifier.toml"
     config_path.write_text(
@@ -122,6 +163,15 @@ include_reposts = true
     assert "Invalid form token" in html
     assert config.accounts[0].include_reposts is True
     assert config.accounts[0].topic_filter is None
+
+
+def test_process_list_commands_support_windows_and_posix():
+    windows_commands = _process_list_commands("nt")
+
+    assert windows_commands[0][0] == "powershell"
+    assert "Get-CimInstance Win32_Process" in windows_commands[0][-1]
+    assert windows_commands[1][0] == "pwsh"
+    assert _process_list_commands("posix") == [["ps", "-axo", "command"]]
 
 
 def _csrf_token(base_url: str) -> str:

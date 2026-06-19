@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 import secrets
 import subprocess
 import threading
@@ -101,8 +102,6 @@ def _make_handler(config_path: Path, *, env_file: Path | None = None):
                     config = _load_config()
                     username = _first(form.get("username"))
                     config.accounts = [account for account in config.accounts if account.username != username]
-                    if not config.accounts:
-                        raise ValueError("At least one account is required.")
                     _save_config(config)
                     self._redirect(notice=f"Removed @{username}.")
                     return
@@ -306,6 +305,12 @@ def _render_page(
 
 
 def _render_account_rows(config: NotifierConfig, expanded: str, csrf_token: str) -> str:
+    if not config.accounts:
+        return """
+<div class="empty-state">
+  <h3>No accounts yet</h3>
+  <p>Add your first @username above. The first daemon run will baseline that account before sending anything to Telegram.</p>
+</div>"""
     rows: list[str] = []
     for account in config.accounts:
         rows.append(_render_account_row(account, config, expanded, csrf_token))
@@ -430,14 +435,30 @@ def _daemon_status() -> dict[str, str]:
 
 
 def _is_daemon_process_running() -> bool:
-    try:
-        output = subprocess.check_output(["ps", "-axo", "command"], text=True, timeout=1.5)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    for line in output.splitlines():
+    for line in _process_command_lines():
         if "twitter-tg-notifs" in line and " run" in line and " web" not in line:
             return True
     return False
+
+
+def _process_command_lines() -> list[str]:
+    for command in _process_list_commands():
+        try:
+            output = subprocess.check_output(command, text=True, timeout=1.5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        return output.splitlines()
+    return []
+
+
+def _process_list_commands(os_name: str | None = None) -> list[list[str]]:
+    if (os_name or os.name) == "nt":
+        powershell_command = "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"
+        return [
+            ["powershell", "-NoProfile", "-Command", powershell_command],
+            ["pwsh", "-NoProfile", "-Command", powershell_command],
+        ]
+    return [["ps", "-axo", "command"]]
 
 
 def _account_by_username(config: NotifierConfig, username: str) -> AccountConfig:
@@ -596,6 +617,14 @@ input { height: 36px; padding: 0 10px; width: 150px; }
 .account-row.selected { background: #fff7e7; }
 .username { font-size: 16px; font-weight: 900; }
 .muted { color: #6f7782; }
+.empty-state {
+  padding: 56px 24px;
+  border-bottom: 1px solid #eef1f4;
+  color: var(--muted);
+  text-align: center;
+}
+.empty-state h3 { margin: 0; color: var(--ink); font-size: 22px; line-height: 28px; }
+.empty-state p { max-width: 460px; margin: 10px auto 0; font-size: 14px; line-height: 21px; }
 .radio-group { display: flex; align-items: center; gap: 9px; }
 .radio-group label { display: inline-flex; align-items: center; gap: 4px; color: #6f7782; font-size: 13px; font-weight: 750; }
 .radio-group label:has(input:checked) { color: var(--ink); font-weight: 900; }
